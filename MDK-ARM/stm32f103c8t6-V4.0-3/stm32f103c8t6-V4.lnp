@@ -8,6 +8,7 @@
 "stm32f103c8t6-v4.0-3\stm32f1xx_hal_msp.o"
 "stm32f103c8t6-v4.0-3\brush_led.o"
 "stm32f103c8t6-v4.0-3\elemach.o"
+"stm32f103c8t6-v4.0-3\rfid_control.o"
 "stm32f103c8t6-v4.0-3\stm32f1xx_hal_gpio_ex.o"
 "stm32f103c8t6-v4.0-3\stm32f1xx_hal_tim.o"
 "stm32f103c8t6-v4.0-3\stm32f1xx_hal_tim_ex.o"

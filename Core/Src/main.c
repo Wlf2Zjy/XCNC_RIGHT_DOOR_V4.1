@@ -128,115 +128,124 @@ void send_response_frame(uint8_t cmd, uint8_t return_len, uint8_t *return_conten
 void process_protocol_frame(void) {
     uint8_t response_content[1] = {0};
     uint8_t response_len = 1;
-		
-// RFID控制指令 (0x01)
-if (rx_cmd == 0x01 && rx_content_index >= 3) {
-    // 解析指令内容: [方向(1字节)] [速度高字节] [速度低字节]
-    uint8_t direction = rx_content[0];
-    uint16_t speed_value = (rx_content[1] << 8) | rx_content[2];
-    
-    // 边界检查
-    if (speed_value > 3000) {
-        speed_value = 3000;
-    }
-    
-    // 检查限位状态（使用中断标志）
-    uint8_t allow_motion = 1; // 默认允许运动
-    
-    if (direction == 0x01) { // 下降
-        if (lower_limit_triggered) {
-            allow_motion = 0; // 下限位已触发，不允许下降
+		switch (rx_cmd)
+    {
+    // 0x01 — RFID控制指令
+    case 0x01:
+        if (rx_content_index >= 3)
+        {
+            uint8_t direction = rx_content[0];  // 解析指令内容: [方向(1字节)] [速度高字节] [速度低字节]
+            uint16_t speed_value = (rx_content[1] << 8) | rx_content[2];
+
+            // 边界设置在3000以内
+            if (speed_value > 3000)
+                speed_value = 3000;
+             // 检查限位状态（使用中断标志）
+            uint8_t allow_motion = 1; // 默认允许运动
+
+            // 检查限位
+            switch (direction)
+            {
+                case 0x01: // 下降
+                    if (lower_limit_triggered)
+                        allow_motion = 0;  // 下限位已触发，不允许下降
+                    break;
+                case 0x00: // 上升
+                    if (upper_limit_triggered)
+                        allow_motion = 0;  // 上限位已触发，不允许上升
+                    break;
+                default:
+                    allow_motion = 0; // 非法方向
+                    break;
+            }
+
+            if (!allow_motion)
+            {
+                Motor_Disable();
+                motor_enabled = 0;
+                response_content[0] = 0x00; // 限位触发或非法方向
+            }
+            else
+            {
+                Motor_SetDirection(direction);  //设置电机方向和速度
+                Motor_SetSpeedFromInput(speed_value);
+                Motor_Enable();
+
+                motor_enabled = 1;  //更新状态变量
+                motor_current_speed = speed_value;
+                motor_current_direction = direction;
+
+                response_content[0] = 0x01; // 成功
+            }
+
+            send_response_frame(0x01, response_len, response_content);  //发送响应帧
         }
-    } else if (direction == 0x00) { // 上升  
-        if (upper_limit_triggered) {
-            allow_motion = 0; // 上限位已触发，不允许上升
+        break;
+
+    // 0x02 — RFID位移指定脉冲距离
+    case 0x02:
+        if (rx_content_index >= 5)
+        {
+					  // 解析指令内容: [运动方向] [运动距离高字节] [运动距离低字节] [速度高字节] [速度低字节]
+            uint8_t direction = rx_content[0];
+            uint16_t distance = (rx_content[1] << 8) | rx_content[2];
+            uint16_t speed_value = (rx_content[3] << 8) | rx_content[4];
+
+            if (speed_value > 3000)
+                speed_value = 3000;
+
+            // 定距离运动,不检查限位，直接启动
+            Motor_DistanceMove(direction, distance, speed_value);
+
+            response_content[0] = 0x01;
+            send_response_frame(0x02, response_len, response_content);  //发送响应帧
         }
-    }
-    
-    if (!allow_motion) {
-        // 限位触发，停止电机并返回错误
-        Motor_Disable();
-        motor_enabled = 0;
-        response_content[0] = 0x00; // 限位触发错误
-    } else {
-        // 设置电机方向和速度
-        Motor_SetDirection(direction);
-        Motor_SetSpeedFromInput(speed_value);
-        Motor_Enable();
-        
-        // 更新状态变量
-        motor_enabled = 1;
-        motor_current_speed = speed_value;
-        motor_current_direction = direction;
-        
-        response_content[0] = 0x01; // 成功
-    }
-    
-    // 发送响应帧
-    send_response_frame(0x01, response_len, response_content);
-    }
-     
-		//RFID位移指定的脉冲距离（0x02）
-		else if (rx_cmd == 0x02 && rx_content_index >= 5) {
-        // 先停止任何正在进行的连续运动
-//        if (motor_enabled && !motor_distance_mode) {
-//            Motor_Disable();
-//            motor_enabled = 0;
-//        }
-        
-        // 解析指令内容: [运动方向] [运动距离高字节] [运动距离低字节] [速度高字节] [速度低字节]
-        uint8_t direction = rx_content[0];
-        uint16_t distance = (rx_content[1] << 8) | rx_content[2];
-        uint16_t speed_value = (rx_content[3] << 8) | rx_content[4];
-        
-        // 边界检查
-        if (speed_value > 3000) {
-            speed_value = 3000;
+        break;
+
+    // 0x03 — 电磁铁开关控制
+    case 0x03:
+        if (rx_content_index >= 1)
+        {
+            switch (rx_content[0])
+            {
+                case 0x01:  // 打开电磁铁
+                    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+                    response_content[0] = 0x01;
+                    break;
+
+                case 0x00:  // 关闭电磁铁
+                    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
+                    response_content[0] = 0x01;
+                    break;
+
+                default:
+                    response_content[0] = 0x00; // 非法参数
+                    break;
+            }
+
+            send_response_frame(0x03, response_len, response_content);
         }
-        
-        // 定距离运动不检查限位，直接启动
-        Motor_DistanceMove(direction, distance, speed_value);
-        
-        response_content[0] = 0x01; // 成功
-        
-        // 发送响应帧
-        send_response_frame(0x02, response_len, response_content);
-    }
-		// 电磁铁开关指令（0x03）
-		else if (rx_cmd == 0x03 && rx_content_index >= 1) {
-        // 根据内容控制
-        if (rx_content[0] == 0x01) {
-					// 打开电磁铁
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
-            response_content[0] = 0x01; // 成功响应
-        } 
-        else if (rx_content[0] == 0x00) {
-            // 关闭电磁铁
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
-            response_content[0] = 0x01; // 成功响应
+        break;
+
+    // 0x08 — RFID运动状态查询
+    case 0x08:
+        if (motor_enabled)  // 检查电机是否在运动（连续运动或定距离运动）
+            response_content[0] = 0x01; // 运动中
+        else
+            response_content[0] = 0x00; // 停止
+
+        send_response_frame(0x08, response_len, response_content);  // 发送响应帧
+        break;
+
+    // 未知指令处理
+    default:
+        response_content[0] = 0x00; // 未知指令响应
+        send_response_frame(rx_cmd, response_len, response_content);
+        break;
         }
-        else {
-            response_content[0] = 0x00; // 失败响应
-        }
-        
-        // 发送响应帧 (指令码0x03)
-        send_response_frame(0x03, response_len, response_content);
-    }
-		// RFID运动状态查询指令 (0x08)
-    else if (rx_cmd == 0x08) {
-        // 检查电机是否在运动（连续运动或定距离运动）
-        if (motor_enabled) {
-            response_content[0] = 0x01; // 电机在运动
-        } else {
-            response_content[0] = 0x00; // 电机停止
-        }
-        
-        // 发送响应帧
-        send_response_frame(0x08, response_len, response_content);
-    }
-    
-    // 重置接收状态
-    rx_content_index = 0;
+
+        // 重置接收状态
+        rx_content_index = 0;
 }
 
 // 串口接收完成回调
