@@ -30,6 +30,7 @@
 #include <stdarg.h>
 #include "stm32f1xx_hal.h"
 #include "Brush_Led.h"
+#include "Rfid_control.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -226,6 +227,47 @@ void process_protocol_frame(void) {
             send_response_frame(0x03, response_len, response_content);
         }
         break;
+				
+		// 0x05 — 读取RFID功率
+    case 0x05:
+        {
+            // (上位机 -> F103 的指令: FE FE 03 02 05 FA)
+            // 通过USART1与RFID通信
+            uint8_t power_value = RFID_ReadPower(); //获取功率值
+
+            response_content[0] = power_value; // 放入读取到的功率值
+            response_len = 1;                  // 内容长度为1字节
+
+            // (F103 -> 上位机 的响应: FE FE 04 02 05 [power_value] FA)
+            send_response_frame(0x05, response_len, response_content);
+        }
+        break;
+				
+		// 0x06 — 设置RFID功率 
+    case 0x06:
+        if (rx_content_index >= 1)
+        {
+            uint8_t power_value = rx_content[0]; // 上位机指令内容就是功率值
+            uint8_t result_code = RFID_SetPower(power_value);   // 通过USART1与RFID通信
+
+            // 上位机期望成功返回 01: FE FE 04 02 06 01 FA
+            if (result_code == 0x01) {
+                // RFID设置成功
+                response_content[0] = 0x01;
+            } else {
+                //设置失败 (超时 0xFF 或校验失败 0xFE)，返回 0x00 作为通用失败标志
+                response_content[0] = 0x00; 
+            }
+            response_len = 1;
+
+            send_response_frame(0x06, response_len, response_content);
+        } else {
+            // 内容长度不足 (未收到功率值)，返回失败
+            response_content[0] = 0x00;
+            response_len = 1;
+            send_response_frame(0x06, response_len, response_content);
+        }
+        break;
 
     // 0x08 — RFID运动状态查询
     case 0x08:
@@ -250,6 +292,16 @@ void process_protocol_frame(void) {
 
 // 串口接收完成回调
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    //处理 huart1 (RFID) 的中断接收
+    if (huart->Instance == USART1)
+    {
+        // 接收到的字节数是 (huart->RxXferSize - huart->RxXferCount)
+        g_rfid_rx_len = huart->RxXferSize - huart->RxXferCount;
+        g_rfid_rx_flag = 1; // 设置接收完成标志
+        return; // 处理完 huart1 后立即返回
+    }
+
+    //处理 huart2 (485) 的中断接收
     if (huart->Instance == USART2) {
 			uint8_t data = uart_rxByte;
 

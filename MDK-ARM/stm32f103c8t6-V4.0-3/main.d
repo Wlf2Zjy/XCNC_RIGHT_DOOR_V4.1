@@ -36,3 +36,4 @@ stm32f103c8t6-v4.0-3\main.o: D:\APP\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
 stm32f103c8t6-v4.0-3\main.o: D:\APP\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
 stm32f103c8t6-v4.0-3\main.o: D:\APP\Keil_v5\ARM\ARMCC\Bin\..\include\stdarg.h
 stm32f103c8t6-v4.0-3\main.o: ../Core/Src/Brush_Led.h
+stm32f103c8t6-v4.0-3\main.o: ../Core/Src/Rfid_control.h
