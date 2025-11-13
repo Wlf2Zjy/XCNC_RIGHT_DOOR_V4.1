@@ -43,6 +43,7 @@
 #define FRAME_HEADER_1 0xFE     // 帧头第一个字节
 #define FRAME_HEADER_2 0xFE     // 帧头第二个字节
 #define FRAME_END 0xFA          // 帧结束字节
+#define EPC_DATA_LEN 16        // EPC 数据长度 (16字节)
 
 // 接收状态枚举
 typedef enum {
@@ -127,7 +128,7 @@ void send_response_frame(uint8_t cmd, uint8_t return_len, uint8_t *return_conten
 
 // 处理接收到的协议帧 
 void process_protocol_frame(void) {
-    uint8_t response_content[1] = {0};
+    uint8_t response_content[EPC_DATA_LEN + 1] = {0}; 
     uint8_t response_len = 1;
 		switch (rx_cmd)
     {
@@ -228,6 +229,39 @@ void process_protocol_frame(void) {
         }
         break;
 				
+				// 0x04 — 循环读取RFID信息并统计 (新增指令)
+    case 0x04:
+        if (rx_content_index >= 2)
+        {
+            uint8_t read_count = rx_content[0];     // 读取次数
+            uint8_t threshold_count = rx_content[1]; // 出现阈值
+            uint8_t epc_data[EPC_DATA_LEN];         // 存储结果
+
+            // 调用循环读取函数
+            // 注意：read_count 和 threshold_count 都是 8bit，最大 255
+            uint8_t result_status = RFID_CyclicRead(read_count, threshold_count, epc_data);
+            
+            // 响应帧为FE FE 13 02 04 [数据内容16个字节] FA
+            // 如果成功 (0x01)，则返回 16 字节 EPC 数据
+            if (result_status == 0x01) {
+                response_len = EPC_DATA_LEN;
+                memcpy(response_content, epc_data, EPC_DATA_LEN);
+            } else {
+                // 如果失败 (0xFF)，返回 16 个 0x00 
+                response_len = EPC_DATA_LEN; 
+                memset(response_content, 0x00, EPC_DATA_LEN);
+            }
+
+            // 返回长度为 16 字节
+            send_response_frame(0x04, response_len, response_content);
+        } else {
+            // 内容长度不足，返回 16 个 0x00
+            response_len = EPC_DATA_LEN; 
+            memset(response_content, 0x00, EPC_DATA_LEN);
+            send_response_frame(0x04, response_len, response_content);
+        }
+        break;
+				
 		// 0x05 — 读取RFID功率
     case 0x05:
         {
@@ -295,10 +329,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     //处理 huart1 (RFID) 的中断接收
     if (huart->Instance == USART1)
     {
-        // 接收到的字节数是 (huart->RxXferSize - huart->RxXferCount)
-        g_rfid_rx_len = huart->RxXferSize - huart->RxXferCount;
-        g_rfid_rx_flag = 1; // 设置接收完成标志
-        return; // 处理完 huart1 后立即返回
+        // 轮询模式下，此回调不应被触发。如果被触发，可能是旧代码残留。
+        // 为确保稳定，我们直接忽略 USART1 的回调事件。
+        return; 
     }
 
     //处理 huart2 (485) 的中断接收
