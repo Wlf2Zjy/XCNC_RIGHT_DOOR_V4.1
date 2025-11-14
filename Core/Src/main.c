@@ -229,7 +229,7 @@ void process_protocol_frame(void) {
         }
         break;
 				
-				// 0x04 — 循环读取RFID信息并统计 (新增指令)
+		// 0x04 — 单步循环读取RFID信息并统计
     case 0x04:
         if (rx_content_index >= 2)
         {
@@ -268,10 +268,8 @@ void process_protocol_frame(void) {
             // (上位机 -> F103 的指令: FE FE 03 02 05 FA)
             // 通过USART1与RFID通信
             uint8_t power_value = RFID_ReadPower(); //获取功率值
-
             response_content[0] = power_value; // 放入读取到的功率值
             response_len = 1;                  // 内容长度为1字节
-
             // (F103 -> 上位机 的响应: FE FE 04 02 05 [power_value] FA)
             send_response_frame(0x05, response_len, response_content);
         }
@@ -329,9 +327,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     //处理 huart1 (RFID) 的中断接收
     if (huart->Instance == USART1)
     {
-        // 轮询模式下，此回调不应被触发。如果被触发，可能是旧代码残留。
-        // 为确保稳定，我们直接忽略 USART1 的回调事件。
-        return; 
+        // 将接收到的字节存入环形缓冲区 
+        rfid_rx_buffer[rfid_rx_head] = rfid_dma_rx_byte;
+        rfid_rx_head = (rfid_rx_head + 1) % RFID_RX_BUFFER_SIZE;
+
+        // 重新启动中断接收下一个字节
+        HAL_UART_Receive_IT(&huart1, &rfid_dma_rx_byte, 1);
+        // --------------------------------------------------
+        return; // 结束 USART1 的处理
     }
 
     //处理 huart2 (485) 的中断接收
@@ -480,6 +483,7 @@ int main(void)
   HAL_TIM_Base_Start_IT(&htim1);  // 启用TIM1更新中断（用于脉冲计数）
 	HAL_TIM_Base_Start_IT(&htim4);  // 启用TIM4更新中断（用于限位消抖）
 	
+	RFID_Init();
 	HAL_UART_Receive_IT(&huart2, &uart_rxByte, 1);  // 启动串口2接收中断
 	
 	Motor_ChangeSubdivision(8);  //细分设置
