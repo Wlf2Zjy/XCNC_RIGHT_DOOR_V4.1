@@ -4,6 +4,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+/*
+读取功率：fe fe 07 02 07 aa 02 01 55 fa
+设置功率：fe fe 09 02 07 aa 04 02 01 14 55 fa
+*/
 
 #include "main.h"
 #include "usart.h" 
@@ -58,6 +62,8 @@ uint8_t RFID_SetPower(uint8_t power);
 
 //循环读取RFID信息，直到达到指定次数，并统计出现频率。
 uint8_t RFID_CyclicRead(uint8_t read_count, uint8_t threshold_count, uint8_t result_epc_data[EPC_DATA_LEN]);
+
+uint8_t RFID_TransparentTransmit(uint8_t *tx_data, uint8_t tx_len, uint8_t *rx_buffer, uint8_t rx_buffer_max_len, uint8_t *actual_rx_len);
 
 
 #ifdef __cplusplus

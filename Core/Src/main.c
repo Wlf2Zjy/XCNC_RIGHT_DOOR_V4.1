@@ -300,6 +300,54 @@ void process_protocol_frame(void) {
             send_response_frame(0x06, response_len, response_content);
         }
         break;
+				
+				// 0x07 — 上位机到 RFID 透明传输 (新增指令)
+    case 0x07:
+        if (rx_content_index > 0)
+        {
+            uint8_t tx_len = rx_content_index;
+            uint8_t rx_len_from_rfid = 0;
+            // 临时缓冲区用于存储RFID的响应数据
+            uint8_t rfid_response[64] = {0}; 
+            const uint8_t MAX_RFID_RX_LEN = 64;
+
+            // 调用透传函数
+            uint8_t result_status = RFID_TransparentTransmit(
+                rx_content,                   // 上位机指令内容作为透传数据
+                tx_len,                       // 上位机指令内容长度
+                rfid_response,                // 接收缓冲区
+                MAX_RFID_RX_LEN,              // 缓冲区最大长度
+                &rx_len_from_rfid             // 实际接收长度
+            );
+
+            // 检查透传结果
+            if (result_status == 0x01) {
+                // 成功收到数据，将 RFID 响应作为返回内容
+                response_len = rx_len_from_rfid;
+                // 注意：这里需要确保 rfid_response 的长度不会超过 response_content 的定义 (EPC_DATA_LEN + 1 = 17)
+                // 由于 response_content 是在函数开头定义的 uint8_t response_content[EPC_DATA_LEN + 1] = {0};
+                // 为了支持不定长透传，需要扩大 response_content 的定义，或者用一个局部的大缓冲区。
+                
+                // 假设 response_content 已经扩大到足以容纳 64 字节:
+                // 由于 response_content 实际是 EPC_DATA_LEN + 1 = 17，这里需要临时使用 rfid_response。
+                // 调整：response_content 是在函数开头定义的，如果需要支持 64 字节透传，必须修改它的定义。
+                // 为保持兼容性，我们直接将 rfid_response 的内容和长度传递给 send_response_frame。
+
+                // send_response_frame(cmd, return_len, return_content)
+                send_response_frame(0x07, response_len, rfid_response);
+            } else {
+                // 失败 (超时或发送失败)，返回 1 字节失败标志 0x00
+                response_len = 1;
+                response_content[0] = 0x00; 
+                send_response_frame(0x07, response_len, response_content);
+            }
+        } else {
+            // 内容长度为 0 (无效指令)，返回 1 字节失败标志 0x00
+            response_len = 1;
+            response_content[0] = 0x00; 
+            send_response_frame(0x07, response_len, response_content);
+        }
+        break;
 
     // 0x08 — RFID运动状态查询
     case 0x08:

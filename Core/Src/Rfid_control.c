@@ -15,6 +15,8 @@ extern UART_HandleTypeDef huart1;
 // RFID 响应超时时间 (毫秒)
 #define RFID_ACK_TIMEOUT 500 
 #define TAG_FRAME_TIMEOUT_MS 100 
+#define RFID_TRANSPARENT_RX_TIMEOUT 1000 // 定义透传接收超时
+#define RFID_TRANSPARENT_IDLE_TIME 5    // 5ms 静默时间
 
 // 临时缓冲区（用于存储待校验帧）
 #define RFID_MAX_RX_LEN 25 
@@ -324,7 +326,7 @@ static uint8_t read_tag_frame_nonblocking(uint32_t timeout_ms)
     return 0x01;
 }
 
-
+//循环读取RFID的数据标签
 uint8_t RFID_CyclicRead(uint8_t read_count, uint8_t threshold_count, uint8_t result_epc_data[EPC_DATA_LEN])
 {
     EPC_Data_t stats[MAX_UNIQUE_TAGS];
@@ -414,7 +416,7 @@ uint8_t RFID_CyclicRead(uint8_t read_count, uint8_t threshold_count, uint8_t res
     result_status = 0x01; // 达到读取次数，成功完成循环
 
   //发送停止循环读取指令: AA 02 12 55
-  stop_and_exit: ;
+  stop_and_exit: ;  //goto 用法，当流程中途失败时，跳到 stop_and_exit，确保发送停止指令
     uint8_t stop_tx[] = {RFID_FRAME_HEADER, 0x02, RFID_CMD_STOP_CYCLE, RFID_FRAME_END};
     
     // 预期确认帧: AA 03 12 00 55 (5 bytes)
@@ -463,8 +465,74 @@ uint8_t RFID_CyclicRead(uint8_t read_count, uint8_t threshold_count, uint8_t res
         result_status = 0xFF;
     }
 
-    cleanup:
+    cleanup:  //无论成功失败，都跳到 cleanup 清空缓冲区，统一退出位置
     // 强制清除环形缓冲区
     flush_rfid_rx_buffer(); 
     return result_status;
+}
+
+uint8_t RFID_TransparentTransmit(uint8_t *tx_data, uint8_t tx_len, uint8_t *rx_buffer, uint8_t rx_buffer_max_len, uint8_t *actual_rx_len)
+{
+    uint32_t startTick = HAL_GetTick();
+    uint32_t last_byte_tick = HAL_GetTick(); // 记录上一次收到字节的时间
+    uint8_t byte;
+    uint16_t current_rx_len = 0;
+    
+    // 清空环形缓冲区，确保干净
+    flush_rfid_rx_buffer();
+    *actual_rx_len = 0;
+
+    // 阻塞发送上位机传入的原始数据给 RFID
+    if (HAL_UART_Transmit(&huart1, tx_data, tx_len, 100) != HAL_OK)
+    {
+        return 0xFF; // 发送失败
+    }
+
+    // 等待 RFID 响应并转发
+    while (HAL_GetTick() - startTick < RFID_TRANSPARENT_RX_TIMEOUT)
+    {
+        if (RFID_ReadByte(&byte)) // 尝试从环形缓冲区读取一个字节
+        {
+            // 更新最后接收时间
+            last_byte_tick = HAL_GetTick(); 
+            
+            if (current_rx_len < rx_buffer_max_len)
+            {
+                rx_buffer[current_rx_len++] = byte;
+            }
+            else
+            {
+                // 接收缓冲区溢出，直接退出
+                *actual_rx_len = (uint8_t)current_rx_len;
+                return 0x01; 
+            }
+        }
+        else // 环形缓冲区为空
+        {
+            // 检查是否已经收到数据，并且是否超过了静默时间
+            if (current_rx_len > 0)
+            {
+                if (HAL_GetTick() - last_byte_tick >= RFID_TRANSPARENT_IDLE_TIME)
+                {
+                    // 超过静默时间，认为数据流结束，提前退出
+                    *actual_rx_len = (uint8_t)current_rx_len;
+                    return 0x01; 
+                }
+            }
+            
+            // 没有收到数据，也没有超过静默时间，小等待
+            HAL_Delay(1);
+        }
+    }
+    
+    // 总超时退出
+    *actual_rx_len = (uint8_t)current_rx_len;
+    
+    // 如果总超时前收到了数据，也视为成功返回
+    if (current_rx_len > 0)
+    {
+        return 0x01;
+    }
+    
+    return 0xFF; // 总超时且未收到任何数据
 }
